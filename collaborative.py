@@ -5,7 +5,7 @@ from collections import defaultdict
 import random
 
 # Load the dataset
-def load_dataset(path="./hetrec2011-lastfm-2k"):
+def load_dataset(path="./datas/hetrec2011-lastfm-2k"):
     # Load user-artist interactions
     user_artists = pd.read_csv(f"{path}/user_artists.dat", sep='\t')
     
