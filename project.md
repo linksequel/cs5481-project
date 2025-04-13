@@ -1,5 +1,9 @@
 # Group Project
 
+## 学习资料
+- https://www.bilibili.com/video/BV12q4y1f7Mv?spm_id_from=333.788.videopod.episodes&vd_source=323a62846d4d9c6ed834cb4716539479&p=3
+- 
+
 ## 指南
 
 1. **小组项目**：每个小组最多可有5名成员，并需在3月25日前向助教提交小组成员名单。
