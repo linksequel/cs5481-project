@@ -4,6 +4,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
 import random
 from tqdm import tqdm
+from scipy.sparse.linalg import svds
+from sklearn.preprocessing import normalize
 
 # Load the dataset
 def load_dataset(path="./datas/hetrec2011-lastfm-2k"):
@@ -77,23 +79,61 @@ def item_based_cf(user_item_matrix_df, user_id, n_items=10, n_recommendations=10
     recommendations = sorted(recommendations.items(), key=lambda x: x[1], reverse=True)[:n_recommendations]
     return recommendations
 
+# SVD-based collaborative filtering
+def svd_based_cf(user_item_matrix_df, user_id, n_factors=50, n_recommendations=10):
+    # Convert to numpy array for SVD
+    user_item_array = user_item_matrix_df.values
+    
+    # Get user index
+    user_idx = user_item_matrix_df.index.get_loc(user_id)
+    
+    # Ensure n_factors is not too large
+    n_factors = min(n_factors, min(user_item_array.shape) - 1)
+    
+    # Perform SVD
+    u, sigma, vt = svds(user_item_array, k=n_factors)
+    
+    # Convert to diagonal matrix
+    sigma_diag = np.diag(sigma)
+    
+    # Reconstruct the matrix using the factors
+    reconstructed_matrix = np.dot(np.dot(u, sigma_diag), vt)
+    
+    # Get the reconstructed ratings for the user
+    user_ratings = reconstructed_matrix[user_idx]
+    
+    # Get actual ratings for the user
+    actual_ratings = user_item_array[user_idx]
+    
+    # Create a mask of items the user hasn't interacted with
+    unrated_items = actual_ratings == 0
+    
+    # Get indices of items the user hasn't interacted with, ordered by predicted rating
+    candidate_items = np.argsort(-user_ratings * unrated_items)[:n_recommendations]
+    
+    # Convert back to original item IDs and predicted scores
+    recommendations = [(user_item_matrix_df.columns[item_idx], user_ratings[item_idx]) 
+                      for item_idx in candidate_items if unrated_items[item_idx]]
+    
+    return recommendations
+
 # Evaluate recommendations
-def evaluate(user_item_matrix, test_ratio=0.2, n_users=10, n_items=10, n_recommendations=10):
+def evaluate(user_item_matrix, test_ratio=0.2, n_users=10, n_items=10, n_factors=50, n_recommendations=10):
     # Create a copy of the matrix to avoid modifying the original
     matrix = user_item_matrix.copy()
     
     # Metrics storage
     metrics = {
         'user_hr': [], 'user_ndcg': [], 'user_mrr': [],
-        'item_hr': [], 'item_ndcg': [], 'item_mrr': []
+        'item_hr': [], 'item_ndcg': [], 'item_mrr': [],
+        'svd_hr': [], 'svd_ndcg': [], 'svd_mrr': []
     }
-    
-    # Add progress bar
-    total_users = len(matrix.index)
-    print(f"Evaluating recommendations for {total_users} users...")
+    sampled_users = random.sample(list(matrix.index), 50)    # Add progress bar
+    total_users = len(sampled_users)
+    print(f"Evaluating recommendations for {len(sampled_users)} users...")
     
     # For each user, hide some interactions as test data
-    for user_id in tqdm(matrix.index, desc="Evaluating", ncols=80):
+    for user_id in tqdm(sampled_users, desc="Evaluating", ncols=80):
         # Get items this user has interacted with
         user_items = matrix.columns[matrix.loc[user_id] > 0].tolist()
         
@@ -110,13 +150,15 @@ def evaluate(user_item_matrix, test_ratio=0.2, n_users=10, n_items=10, n_recomme
         for item in test_items:
             train_matrix.loc[user_id, item] = 0
         
-        # Get recommendations from both methods
+        # Get recommendations from all methods
         user_recs = user_based_cf(train_matrix, user_id, n_users, n_recommendations)
         item_recs = item_based_cf(train_matrix, user_id, n_items, n_recommendations)
+        svd_recs = svd_based_cf(train_matrix, user_id, n_factors, n_recommendations)
         
         # Extract just the item IDs
         user_rec_items = [item_id for item_id, _ in user_recs]
         item_rec_items = [item_id for item_id, _ in item_recs]
+        svd_rec_items = [item_id for item_id, _ in svd_recs]
         
         # Calculate metrics for user-based CF
         metrics['user_hr'].append(hit_ratio(user_rec_items, test_items))
@@ -127,7 +169,11 @@ def evaluate(user_item_matrix, test_ratio=0.2, n_users=10, n_items=10, n_recomme
         metrics['item_hr'].append(hit_ratio(item_rec_items, test_items))
         metrics['item_ndcg'].append(ndcg(item_rec_items, test_items))
         metrics['item_mrr'].append(mrr(item_rec_items, test_items))
-        print(metrics)
+        
+        # Calculate metrics for SVD-based CF
+        metrics['svd_hr'].append(hit_ratio(svd_rec_items, test_items))
+        metrics['svd_ndcg'].append(ndcg(svd_rec_items, test_items))
+        metrics['svd_mrr'].append(mrr(svd_rec_items, test_items))
     
     # Calculate average metrics
     avg_metrics = {k: np.mean(v) for k, v in metrics.items() if v}
@@ -171,7 +217,6 @@ def main():
 
     # Example: Get recommendations for a specific user
     user_id = user_item_matrix_df.index[0]  # First user in the dataset
-    # user_id = int(input("input the user id:"))
     
     print(f"User-based recommendations for user {user_id}:")
     user_recommendations = user_based_cf(user_item_matrix_df, user_id)
@@ -185,11 +230,19 @@ def main():
         artist_name = artists[artists['id'] == item_id]['name'].values[0] if item_id in artists['id'].values else "Unknown"
         print(f"Artist ID: {item_id}, Score: {score:.2f}, Name: {artist_name}")
     
+    print(f"\nSVD-based recommendations for user {user_id}:")
+    svd_recommendations = svd_based_cf(user_item_matrix_df, user_id)
+    for item_id, score in svd_recommendations:
+        artist_name = artists[artists['id'] == item_id]['name'].values[0] if item_id in artists['id'].values else "Unknown"
+        print(f"Artist ID: {item_id}, Score: {score:.2f}, Name: {artist_name}")
+    
     # Evaluate the models
+    print("\nEvaluating recommendation methods...")
     metrics = evaluate(user_item_matrix_df)
     print(f"\nEvaluation results:")
     print(f"User-based CF - HR@K: {metrics['user_hr']:.4f}, NDCG@K: {metrics['user_ndcg']:.4f}, MRR@K: {metrics['user_mrr']:.4f}")
     print(f"Item-based CF - HR@K: {metrics['item_hr']:.4f}, NDCG@K: {metrics['item_ndcg']:.4f}, MRR@K: {metrics['item_mrr']:.4f}")
+    print(f"SVD-based CF - HR@K: {metrics['svd_hr']:.4f}, NDCG@K: {metrics['svd_ndcg']:.4f}, MRR@K: {metrics['svd_mrr']:.4f}")
 
 if __name__ == "__main__":
     main()
