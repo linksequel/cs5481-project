@@ -5,10 +5,9 @@ from collections import defaultdict
 import random
 from tqdm import tqdm
 from scipy.sparse.linalg import svds
-from sklearn.preprocessing import normalize
 
 # Load the dataset
-def load_dataset(path="./datas/hetrec2011-lastfm-2k"):
+def load_lastfm(path="./datas/hetrec2011-lastfm-2k"):
     # Load user-artist interactions
     user_artists = pd.read_csv(f"{path}/user_artists.dat", sep='\t')
     
@@ -128,8 +127,8 @@ def evaluate(user_item_matrix, test_ratio=0.2, n_users=10, n_items=10, n_factors
         'item_hr': [], 'item_ndcg': [], 'item_mrr': [],
         'svd_hr': [], 'svd_ndcg': [], 'svd_mrr': []
     }
-    sampled_users = random.sample(list(matrix.index), 50)    # Add progress bar
-    total_users = len(sampled_users)
+    # if not sample, cause 3 hours to execute evaluate but get similar results with using sample...
+    sampled_users = random.sample(list(matrix.index), 50)
     print(f"Evaluating recommendations for {len(sampled_users)} users...")
     
     # For each user, hide some interactions as test data
@@ -209,40 +208,48 @@ def mrr(recommended_items, test_items):
             return 1 / (i + 1)  # i+1 because i starts from 0
     return 0
 
-# Main function
-def main():
-    # Load and preprocess data
-    user_artists, artists = load_dataset()
+def load_and_preprocess_data():
+    user_artists, artists = load_lastfm()
     user_item_matrix_df = preprocess_data(user_artists)
+    return user_artists, artists, user_item_matrix_df
 
-    # Example: Get recommendations for a specific user
-    user_id = user_item_matrix_df.index[0]  # First user in the dataset
-    
-    print(f"User-based recommendations for user {user_id}:")
+def print_recommendations(user_id, recommendations, artists, method_name):
+    print(f"\n{method_name} recommendations for user {user_id}:")
+    for item_id, score in recommendations:
+        artist_name = artists[artists['id'] == item_id]['name'].values[0] if item_id in artists['id'].values else "Unknown"
+        print(f"Artist ID: {item_id}, Score: {score:.2f}, Name: {artist_name}")
+
+def generate_recommendations(user_item_matrix_df, user_id, artists):
+    # Get recommendations using different methods
     user_recommendations = user_based_cf(user_item_matrix_df, user_id)
-    for item_id, score in user_recommendations:
-        artist_name = artists[artists['id'] == item_id]['name'].values[0] if item_id in artists['id'].values else "Unknown"
-        print(f"Artist ID: {item_id}, Score: {score:.2f}, Name: {artist_name}")
+    print_recommendations(user_id, user_recommendations, artists, "User-based")
     
-    print(f"\nItem-based recommendations for user {user_id}:")
     item_recommendations = item_based_cf(user_item_matrix_df, user_id)
-    for item_id, score in item_recommendations:
-        artist_name = artists[artists['id'] == item_id]['name'].values[0] if item_id in artists['id'].values else "Unknown"
-        print(f"Artist ID: {item_id}, Score: {score:.2f}, Name: {artist_name}")
+    print_recommendations(user_id, item_recommendations, artists, "Item-based")
     
-    print(f"\nSVD-based recommendations for user {user_id}:")
     svd_recommendations = svd_based_cf(user_item_matrix_df, user_id)
-    for item_id, score in svd_recommendations:
-        artist_name = artists[artists['id'] == item_id]['name'].values[0] if item_id in artists['id'].values else "Unknown"
-        print(f"Artist ID: {item_id}, Score: {score:.2f}, Name: {artist_name}")
-    
-    # Evaluate the models
+    print_recommendations(user_id, svd_recommendations, artists, "SVD-based")
+
+def evaluate_models(user_item_matrix_df):
     print("\nEvaluating recommendation methods...")
     metrics = evaluate(user_item_matrix_df)
     print(f"\nEvaluation results:")
     print(f"User-based CF - HR@K: {metrics['user_hr']:.4f}, NDCG@K: {metrics['user_ndcg']:.4f}, MRR@K: {metrics['user_mrr']:.4f}")
     print(f"Item-based CF - HR@K: {metrics['item_hr']:.4f}, NDCG@K: {metrics['item_ndcg']:.4f}, MRR@K: {metrics['item_mrr']:.4f}")
     print(f"SVD-based CF - HR@K: {metrics['svd_hr']:.4f}, NDCG@K: {metrics['svd_ndcg']:.4f}, MRR@K: {metrics['svd_mrr']:.4f}")
+
+def main():
+    # Load and preprocess data
+    user_artists, artists, user_item_matrix_df = load_and_preprocess_data()
+    
+    # Example: Get recommendations for a specific user
+    user_id = user_item_matrix_df.index[0]  # First user in the dataset
+    
+    # Generate and print recommendations
+    generate_recommendations(user_item_matrix_df, user_id, artists)
+    
+    # Evaluate the models
+    evaluate_models(user_item_matrix_df)
 
 if __name__ == "__main__":
     main()
