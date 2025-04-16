@@ -13,7 +13,7 @@ author: suqiulin-72405483
     - itemCF won't be implement because there are 292757 movies(item) which is very slow performed on traditional cpu
 """
 # Load the ML-32M dataset
-def load_ml32m(path="./datas/ml-32m"):
+def load_ml32m(path="../datas/ml-32m"):
     print("Loading ML-32M dataset...")
     # Load ratings data in chunks due to large size
     ratings = pd.read_csv(f"{path}/ratings.csv", chunksize=1000000)
@@ -83,30 +83,6 @@ def user_based_cf(matrix, user_idx, n_users=10, n_recommendations=10):
     recommendations = sorted(recommendations.items(), key=lambda x: x[1], reverse=True)[:n_recommendations]
     return recommendations
 
-# Item-based collaborative filtering
-def item_based_cf(matrix, user_idx, n_items=10, n_recommendations=10):
-    # Get user's rated items
-    user_row = matrix[user_idx].toarray().flatten()
-    user_rated_items = np.where(user_row > 0)[0]
-    
-    # Get recommendations
-    recommendations = defaultdict(float)
-    for item_idx in user_rated_items:
-        item_col = matrix.T[item_idx].toarray().flatten()
-        
-        # Find similar items
-        for other_item_idx in range(matrix.shape[1]):
-            if other_item_idx != item_idx and user_row[other_item_idx] == 0:
-                other_item_col = matrix.T[other_item_idx].toarray().flatten()
-                # Compute similarity only if items have common users
-                if np.sum(item_col > 0) > 0 and np.sum(other_item_col > 0) > 0:
-                    sim = cosine_similarity(item_col.reshape(1, -1), other_item_col.reshape(1, -1))[0][0]
-                    recommendations[other_item_idx] += sim * user_row[item_idx]
-    
-    # Sort recommendations
-    recommendations = sorted(recommendations.items(), key=lambda x: x[1], reverse=True)[:n_recommendations]
-    return recommendations
-
 # SVD-based collaborative filtering
 def svd_based_cf(matrix, user_idx, n_factors=50, n_recommendations=10):
     # Perform SVD
@@ -157,17 +133,21 @@ def mrr(recommended_items, test_items):
             return 1 / (i + 1)
     return 0
 
-# Evaluate recommendations
-def evaluate(matrix, users, test_ratio=0.2, n_users=10, n_items=10, n_factors=50, n_recommendations=10):
+# Evaluate recommendations with configurable hyperparameters
+def evaluate(matrix, users, config, test_ratio=0.2):
+    n_users = config['n_users']
+    n_items = config['n_items']
+    n_factors = config['n_factors']
+    n_recommendations = config['n_recommendations']
+    
     metrics = {
         'user_hr': [], 'user_ndcg': [], 'user_mrr': [],
-        'item_hr': [], 'item_ndcg': [], 'item_mrr': [],
         'svd_hr': [], 'svd_ndcg': [], 'svd_mrr': []
     }
     
     # Sample users for evaluation
     sampled_users = random.sample(range(len(users)), min(50, len(users)))
-    print(f"Evaluating recommendations for {len(sampled_users)} users...")
+    print(f"Evaluating recommendations with n_users={n_users}, n_items={n_items}, n_recommendations={n_recommendations}")
     
     for user_idx in tqdm(sampled_users, desc="Evaluating", ncols=80):
         # Get items user has rated
@@ -189,7 +169,6 @@ def evaluate(matrix, users, test_ratio=0.2, n_users=10, n_items=10, n_factors=50
         
         # Get recommendations
         user_recs = user_based_cf(train_matrix, user_idx, n_users, n_recommendations)
-        # item_recs = item_based_cf(train_matrix, user_idx, n_items, n_recommendations)
         svd_recs = svd_based_cf(train_matrix, user_idx, n_factors, n_recommendations)
         
         # Extract just the item indices
@@ -219,38 +198,94 @@ def print_recommendations(user_id, recommendations, original_items, movies=None,
         else:
             print(f"Movie ID: {item_id}, Score: {score:.2f}")
 
+def run_experiment(matrix, users, items, movies, configs):
+    # Store evaluation results
+    all_results = []
+    
+    # Example: Get recommendations for a specific user with different configs
+    user_idx = 0  # First user in the sample
+    original_user_id = users[user_idx]
+    
+    print(f"\nGenerating recommendations for user {original_user_id} with different configurations...")
+    
+    for config in configs:
+        n_users = config['n_users']
+        n_items = config['n_items']
+        n_factors = config['n_factors']
+        n_recommendations = config['n_recommendations']
+        
+        print(f"\nConfig: n_users={n_users}, n_items={n_items}, n_factors={n_factors}, n_recommendations={n_recommendations}")
+        
+        user_recs = user_based_cf(matrix, user_idx, n_users, n_recommendations)
+        svd_recs = svd_based_cf(matrix, user_idx, n_factors, n_recommendations)
+        
+        print_recommendations(original_user_id, user_recs, items, movies, f"User-based (n_users={n_users})")
+        print_recommendations(original_user_id, svd_recs, items, movies, f"SVD-based (n_factors={n_factors})")
+        
+        # Evaluate models
+        print("\nEvaluating recommendation methods...")
+        metrics = evaluate(matrix, users, config)
+        
+        # Store results
+        result = {
+            'config': f"n_users={n_users}, n_items={n_items}, n_factors={n_factors}, n_recommendations={n_recommendations}",
+            'user_hr': metrics['user_hr'],
+            'user_ndcg': metrics['user_ndcg'],
+            'user_mrr': metrics['user_mrr'],
+            'svd_hr': metrics['svd_hr'],
+            'svd_ndcg': metrics['svd_ndcg'],
+            'svd_mrr': metrics['svd_mrr']
+        }
+        all_results.append(result)
+    
+    return all_results
+
+def display_results(all_results):
+    # Display results in a table format
+    print("\n===== Hyperparameter Comparison Results =====")
+    headers = ["Config", "UserCF HR", "UserCF NDCG", "UserCF MRR", "SVD HR", "SVD NDCG", "SVD MRR"]
+    print("{:<50} {:<10} {:<10} {:<10} {:<10} {:<10} {:<10}".format(*headers))
+    print("-" * 110)
+    
+    for result in all_results:
+        row = [
+            result['config'],
+            f"{result['user_hr']:.4f}",
+            f"{result['user_ndcg']:.4f}",
+            f"{result['user_mrr']:.4f}",
+            f"{result['svd_hr']:.4f}",
+            f"{result['svd_ndcg']:.4f}",
+            f"{result['svd_mrr']:.4f}"
+        ]
+        print("{:<50} {:<10} {:<10} {:<10} {:<10} {:<10} {:<10}".format(*row))
+    
+    # Create pandas DataFrame for better visualization
+    results_df = pd.DataFrame(all_results)
+    print("\nResults as DataFrame:")
+    print(results_df[['config', 'user_hr', 'user_ndcg', 'user_mrr', 'svd_hr', 'svd_ndcg', 'svd_mrr']])
+    results_df.to_csv("ml32m.csv", index=False)
+
 def main():
     # Load and preprocess data
     ratings_df, movies = load_ml32m()
 
-    # Use a sample of the data if it's too large
-    #（may generate 16966441536 which will crush the program）
-    # Adjust based on your hardware capabilities
-    sample_size = 10000
+    # Use a sample of the data
+    sample_size = 5000
     print(f"Using a sample of {sample_size} users for analysis...")
     
     matrix, users, items, user_mapper, item_mapper = preprocess_data(ratings_df, sample_size)
     
-    # Example: Get recommendations for a specific user
-    user_idx = 0  # First user in the sample
-    original_user_id = users[user_idx]
+    # Hyperparameter configurations to test
+    configs = [
+        {'n_users': 10, 'n_items': 10, 'n_factors': 50, 'n_recommendations': 10}
+        # {'n_users': 20, 'n_items': 20, 'n_factors': 100, 'n_recommendations': 15},
+    ]
     
-    # Generate recommendations
-    print(f"\nGenerating recommendations for user {original_user_id}...")
+    # Run experiments with different configurations
+    all_results = run_experiment(matrix, users, items, movies, configs)
     
-    user_recs = user_based_cf(matrix, user_idx)
-    print_recommendations(original_user_id, user_recs, items, movies, "User-based")
-    
-    svd_recs = svd_based_cf(matrix, user_idx)
-    print_recommendations(original_user_id, svd_recs, items, movies, "SVD-based")
-    
-    # Evaluate models
-    print("\nEvaluating recommendation methods...")
-    metrics = evaluate(matrix, users)
-    
-    print(f"\nEvaluation results:")
-    print(f"User-based CF - HR@K: {metrics['user_hr']:.4f}, NDCG@K: {metrics['user_ndcg']:.4f}, MRR@K: {metrics['user_mrr']:.4f}")
-    print(f"SVD-based CF - HR@K: {metrics['svd_hr']:.4f}, NDCG@K: {metrics['svd_ndcg']:.4f}, MRR@K: {metrics['svd_mrr']:.4f}")
+    # Display results
+    display_results(all_results)
 
 if __name__ == "__main__":
     main()

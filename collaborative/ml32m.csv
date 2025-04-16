@@ -1,0 +1,2 @@
+config,user_hr,user_ndcg,user_mrr,svd_hr,svd_ndcg,svd_mrr
+"n_users=10, n_items=10, n_factors=50, n_recommendations=10",0.031882505705779995,0.798750966100593,0.9066666666666666,0.037240663319906914,0.9299070586016183,0.99

@@ -1,0 +1,2 @@
+n_users,n_items,n_factors,n_recommendations,user_hr,user_ndcg,user_mrr,item_hr,item_ndcg,item_mrr,svd_hr,svd_ndcg,svd_mrr
+10,10,50,10,0.1133,0.1398,0.3943,0.02,0.0208,0.0648,0.06,0.0614,0.1316
